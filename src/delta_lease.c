@@ -156,7 +156,8 @@ int delta_read_lockspace(struct task *task,
 			 uint64_t host_id,
 			 struct sanlk_lockspace *ls,
 			 int io_timeout,
-			 int *io_timeout_ret)
+			 int *io_timeout_ret,
+			 struct delta_extra *extra)
 {
 	struct leader_record leader;
 	char *space_name;
@@ -182,6 +183,12 @@ int delta_read_lockspace(struct task *task,
 		memcpy(ls->name, leader.space_name, SANLK_NAME_LEN);
 		ls->host_id = host_id;
 		*io_timeout_ret = leader.io_timeout;
+
+		if (extra) {
+			extra->field1 = leader.write_id;
+			extra->field2 = leader.write_generation;
+			extra->field3 = leader.write_timestamp;
+		}
 	}
 
 	return error;
@@ -352,6 +359,10 @@ int delta_lease_acquire(struct task *task,
 	snprintf(leader.resource_name, NAME_ID_SIZE, "%s", our_host_name);
 	leader.checksum = leader_checksum(&leader);
 
+	leader.write_id = 0;
+	leader.write_generation = 0;
+	leader.write_timestamp = 0;
+
 	log_space(sp, "delta_acquire write %llu %llu %llu %.48s",
 		  (unsigned long long)leader.owner_id,
 		  (unsigned long long)leader.owner_generation,
@@ -410,6 +421,7 @@ int delta_lease_renew(struct task *task,
 		      struct sync_disk *disk,
 		      char *space_name,
 		      char *bitmap,
+		      struct delta_extra *extra,
 		      int prev_result,
 		      int *read_result,
 		      struct leader_record *leader_last,
@@ -566,6 +578,12 @@ int delta_lease_renew(struct task *task,
 
 	leader.timestamp = new_ts;
 	leader.checksum = leader_checksum(&leader);
+
+	if (extra) {
+		leader.write_id = extra->field1;
+		leader.write_generation = extra->field2;
+		leader.write_timestamp = extra->field3;
+	}
 
 	p_wbuf = &wbuf;
 	rv = posix_memalign((void *)p_wbuf, getpagesize(), sector_size);

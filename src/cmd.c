@@ -1159,6 +1159,40 @@ static void cmd_get_lvb(struct task *task GNUC_UNUSED, struct cmd_args *ca)
 	client_resume(ca->ci_in);
 }
 
+static void cmd_set_message(struct task *task GNUC_UNUSED, struct cmd_args *ca)
+{
+	struct sanlk_lockspace lockspace;
+	struct sanlk_host_message hm;
+	struct sm_header h;
+	int rv, fd, result;
+
+	fd = client[ca->ci_in].fd;
+
+	rv = recv(fd, &lockspace, sizeof(struct sanlk_lockspace), MSG_WAITALL);
+	if (rv != sizeof(struct sanlk_lockspace)) {
+		result = -ENOTCONN;
+		goto reply;
+	}
+
+	rv = recv(fd, &hm, sizeof(struct sanlk_host_message), MSG_WAITALL);
+	if (rv != sizeof(struct sanlk_host_message)) {
+		result = -ENOTCONN;
+		goto reply;
+	}
+
+	result = set_lockspace_message(&lockspace, &hm);
+ reply:
+	memcpy(&h, &ca->header, sizeof(struct sm_header));
+	h.version = SM_PROTO;
+	h.data = result;
+	h.data2 = hm.seq;
+	h.length = sizeof(h);
+
+	send(fd, &h, sizeof(h), MSG_NOSIGNAL);
+
+	client_resume(ca->ci_in);
+}
+
 static void cmd_add_lockspace(struct cmd_args *ca)
 {
 	struct sanlk_lockspace lockspace;
@@ -1389,10 +1423,15 @@ static void cmd_read_lockspace(struct task *task, struct cmd_args *ca)
 {
 	struct sm_header h;
 	struct sanlk_lockspace lockspace;
+	struct sanlk_host_message hm;
+	struct delta_extra extra;
 	struct sync_disk sd;
 	uint64_t host_id;
 	int io_timeout = 0;
 	int fd, rv, result;
+
+	memset(&hm, 0, sizeof(hm));
+	memset(&extra , 0, sizeof(extra));
 
 	fd = client[ca->ci_in].fd;
 
@@ -1432,11 +1471,13 @@ static void cmd_read_lockspace(struct task *task, struct cmd_args *ca)
 
 	/* sets ls->name and io_timeout */
 	result = delta_read_lockspace(task, &sd, host_id, &lockspace,
-				      DEFAULT_IO_TIMEOUT, &io_timeout);
+				      DEFAULT_IO_TIMEOUT, &io_timeout, &extra);
 	if (result == SANLK_OK)
 		result = 0;
 
 	close_disks(&sd, 1);
+
+	host_message_from_extra(&hm, &extra);
  reply:
 	log_debug("cmd_read_lockspace %d,%d done %d", ca->ci_in, fd, result);
 
@@ -1447,6 +1488,8 @@ static void cmd_read_lockspace(struct task *task, struct cmd_args *ca)
 	h.length = sizeof(h) + sizeof(lockspace);
 	send(fd, &h, sizeof(h), MSG_NOSIGNAL);
 	send(fd, &lockspace, sizeof(lockspace), MSG_NOSIGNAL);
+	if (ca->header.cmd == SM_CMD_READ_LOCKSPACE_MESSAGE)
+		send(fd, &hm, sizeof(hm), MSG_NOSIGNAL);
 	client_resume(ca->ci_in);
 }
 
@@ -1887,6 +1930,7 @@ void call_cmd_thread(struct task *task, struct cmd_args *ca)
 		cmd_write_resource(task, ca);
 		break;
 	case SM_CMD_READ_LOCKSPACE:
+	case SM_CMD_READ_LOCKSPACE_MESSAGE:
 		cmd_read_lockspace(task, ca);
 		break;
 	case SM_CMD_READ_RESOURCE:
@@ -1907,6 +1951,9 @@ void call_cmd_thread(struct task *task, struct cmd_args *ca)
 		break;
 	case SM_CMD_GET_LVB:
 		cmd_get_lvb(task, ca);
+		break;
+	case SM_CMD_SET_MESSAGE:
+		cmd_set_message(task, ca);
 		break;
 	};
 }

@@ -408,6 +408,80 @@ int sanlock_read_lockspace(struct sanlk_lockspace *ls, uint32_t flags, uint32_t 
 	return rv;
 }
 
+int sanlock_read_lockspace_message(struct sanlk_lockspace *ls, uint32_t flags,
+				   uint32_t *io_timeout,
+				   struct sanlk_host_message *hm)
+{
+	struct sm_header h;
+	int rv, fd;
+
+	if (!ls || !ls->host_id_disk.path[0])
+		return -EINVAL;
+
+	rv = connect_socket(&fd);
+	if (rv < 0)
+		return rv;
+
+	rv = send_header(fd, SM_CMD_READ_LOCKSPACE_MESSAGE, flags,
+			 sizeof(struct sanlk_lockspace),
+			 0, 0);
+	if (rv < 0)
+		goto out;
+
+	rv = send(fd, ls, sizeof(struct sanlk_lockspace), 0);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	/* receive result, io_timeout and ls struct */
+
+	memset(&h, 0, sizeof(struct sm_header));
+
+	rv = recv(fd, &h, sizeof(h), MSG_WAITALL);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	if (rv != sizeof(h)) {
+		rv = -1;
+		goto out;
+	}
+
+	rv = (int)h.data;
+	if (rv < 0)
+		goto out;
+
+	rv = recv(fd, ls, sizeof(struct sanlk_lockspace), MSG_WAITALL);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	if (rv != sizeof(struct sanlk_lockspace)) {
+		rv = -1;
+		goto out;
+	}
+
+	rv = recv(fd, hm, sizeof(struct sanlk_host_message), MSG_WAITALL);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	if (rv != sizeof(struct sanlk_host_message)) {
+		rv = -1;
+		goto out;
+	}
+
+	*io_timeout = h.data2;
+	rv = (int)h.data;
+ out:
+	close(fd);
+	return rv;
+}
+
 int sanlock_read_resource(struct sanlk_resource *res, uint32_t flags)
 {
 	struct sm_header h;
@@ -700,6 +774,74 @@ int sanlock_test_resource_owners(struct sanlk_resource *res GNUC_UNUSED,
 		*test_flags |= SANLK_TRF_FAIL;
 
 	return 0;
+}
+
+int sanlock_set_message(const char *ls_name, uint32_t flags,
+			int hm_size, struct sanlk_host_message *hm)
+{
+	struct sanlk_lockspace ls;
+	struct sanlk_host_message msg;
+	struct sm_header h;
+	int rv, fd;
+
+	if (!ls_name || !hm || !hm_size)
+		return -EINVAL;
+
+	memset(&ls, 0, sizeof(struct sanlk_lockspace));
+	strncpy(ls.name, ls_name, SANLK_NAME_LEN);
+
+	rv = connect_socket(&fd);
+	if (rv < 0)
+		return rv;
+
+	memset(&msg, 0, sizeof(msg));
+
+	if (hm_size < sizeof(msg))
+		memcpy(&msg, hm, hm_size);
+	else if (hm_size > sizeof(msg))
+		memcpy(&msg, hm, sizeof(msg));
+	else
+		memcpy(&msg, hm, sizeof(msg));
+
+	rv = send_header(fd, SM_CMD_SET_MESSAGE, flags,
+			 sizeof(struct sanlk_lockspace) + sizeof(struct sanlk_host_message),
+			 0, 0);
+	if (rv < 0)
+		goto out;
+
+	rv = send(fd, &ls, sizeof(struct sanlk_lockspace), 0);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	rv = send(fd, &msg, sizeof(struct sanlk_host_message), 0);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	memset(&h, 0, sizeof(struct sm_header));
+
+	rv = recv(fd, &h, sizeof(h), MSG_WAITALL);
+	if (rv < 0) {
+		rv = -errno;
+		goto out;
+	}
+
+	if (rv != sizeof(h)) {
+		rv = -1;
+		goto out;
+	}
+
+	rv = (int)h.data;
+	if (rv < 0)
+		goto out;
+
+	hm->seq = h.data2;
+ out:
+	close(fd);
+	return rv;
 }
 
 /* old api */

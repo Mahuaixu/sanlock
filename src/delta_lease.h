@@ -30,6 +30,7 @@ int delta_lease_renew(struct task *task,
                       struct sync_disk *disk,
                       char *space_name,
                       char *bitmap,
+		      struct delta_extra *extra,
                       int prev_result,
 		      int *read_result,
                       struct leader_record *leader_last,
@@ -53,6 +54,7 @@ int delta_read_lockspace(struct task *task,
 			uint64_t host_id,
 			struct sanlk_lockspace *ls,
 			int io_timeout,
-			int *io_timeout_ret);
+			int *io_timeout_ret,
+			struct delta_extra *extra);
 
 #endif

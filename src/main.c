@@ -1190,10 +1190,12 @@ static void process_connection(int ci)
 	case SM_CMD_WRITE_LOCKSPACE:
 	case SM_CMD_WRITE_RESOURCE:
 	case SM_CMD_READ_LOCKSPACE:
+	case SM_CMD_READ_LOCKSPACE_MESSAGE:
 	case SM_CMD_READ_RESOURCE:
 	case SM_CMD_READ_RESOURCE_OWNERS:
 	case SM_CMD_SET_LVB:
 	case SM_CMD_GET_LVB:
+	case SM_CMD_SET_MESSAGE:
 		rv = client_suspend(ci);
 		if (rv < 0)
 			return;
@@ -1806,13 +1808,15 @@ static void print_usage(void)
 	printf("  -w 0|1        use watchdog through wdmd (%d)\n", DEFAULT_USE_WATCHDOG);
 	printf("  -h 0|1        use high priority (RR) scheduling (%d)\n", DEFAULT_HIGH_PRIORITY);
 	printf("  -l <num>      use mlockall (0 none, 1 current, 2 current and future) (%d)\n", DEFAULT_MLOCK_LEVEL);
-	printf("  -a 0|1        use async io (%d)\n", DEFAULT_USE_AIO);
+	/* non-aio is untested and may not work */
+	/* printf("  -a 0|1        use async io (%d)\n", DEFAULT_USE_AIO); */
 	printf("  -o 0|1        io timeout in seconds (%d)\n", DEFAULT_IO_TIMEOUT);
 	printf("\n");
 	printf("sanlock client <action> [options]\n");
 	printf("sanlock client status [-D] [-o p|s]\n");
 	printf("sanlock client gets [-h 0|1]\n");
 	printf("sanlock client host_status -s LOCKSPACE [-D]\n");
+	printf("sanlock client set_message -s LOCKSPACE -i <host_id> [-g gen] -m <msg> [-n <seq>]\n");
 	printf("sanlock client log_dump\n");
 	printf("sanlock client shutdown [-f 0|1]\n");
 	printf("sanlock client init -s LOCKSPACE | -r RESOURCE\n");
@@ -1955,6 +1959,8 @@ static int read_command_line(int argc, char *argv[])
 			com.action = ACT_CLIENT_READ;
 		else if (!strcmp(act, "version"))
 			com.action = ACT_VERSION;
+		else if (!strcmp(act, "set_message"))
+			com.action = ACT_SET_MESSAGE;
 		else {
 			log_tool("client action \"%s\" is unknown", act);
 			exit(EXIT_FAILURE);
@@ -2068,9 +2074,11 @@ static int read_command_line(int argc, char *argv[])
 			break;
 		case 'n':
 			com.num_hosts = atoi(optionarg);
+			com.hm_seq = strtoul(optionarg, NULL, 0);
 			break;
 		case 'm':
 			com.max_hosts = atoi(optionarg);
+			com.hm_msg = strtoul(optionarg, NULL, 0);
 			break;
 		case 'p':
 			com.pid = atoi(optionarg);
@@ -2079,7 +2087,7 @@ static int read_command_line(int argc, char *argv[])
 			strncpy(com.our_host_name, optionarg, NAME_ID_SIZE);
 			break;
 		case 'i':
-			com.local_host_id = atoll(optionarg);
+			com.host_id = atoll(optionarg);
 			break;
 		case 'g':
 			if (com.type == COM_DAEMON) {
@@ -2087,7 +2095,7 @@ static int read_command_line(int argc, char *argv[])
 				if (sec <= 60 && sec >= 0)
 					kill_grace_seconds = sec;
 			} else {
-				com.local_host_generation = atoll(optionarg);
+				com.host_generation = atoll(optionarg);
 			}
 			break;
 		case 'f':
@@ -2267,13 +2275,18 @@ static int do_client_gets(void)
 
 static int do_client_read(void)
 {
+	struct sanlk_host_message hm;
 	struct sanlk_host *hss = NULL, *hs;
 	char *res_str = NULL;
 	uint32_t io_timeout = 0;
 	int rv, i, hss_count = 0;
 
 	if (com.lockspace.host_id_disk.path[0]) {
-		rv = sanlock_read_lockspace(&com.lockspace, 0, &io_timeout);
+		if (!com.get_hosts) {
+			rv = sanlock_read_lockspace(&com.lockspace, 0, &io_timeout);
+		} else {
+			rv = sanlock_read_lockspace_message(&com.lockspace, 0, &io_timeout, &hm);
+		}
 	} else {
 		if (!com.get_hosts) {
 			rv = sanlock_read_resource(com.res_args[0], 0);
@@ -2295,6 +2308,15 @@ static int do_client_read(void)
 			 com.lockspace.host_id_disk.path,
 			 (unsigned long long)com.lockspace.host_id_disk.offset);
 		log_tool("io_timeout %u", io_timeout);
+
+		if (com.get_hosts) {
+			log_tool("message host_id %llu gen %llu msg 0x%08x seq 0x%08x",
+				 (unsigned long long)hm.host_id,
+				 (unsigned long long)hm.generation,
+				 hm.msg, hm.seq);
+			log_tool("ack host_id %llu seq 0x%08x",
+				 (unsigned long long)hm.ack_host, hm.ack_seq);
+		}
 		goto out;
 	}
 
@@ -2365,6 +2387,7 @@ static void do_client_version(void)
 
 static int do_client(void)
 {
+	struct sanlk_host_message hm;
 	struct sanlk_resource **res_args = NULL;
 	struct sanlk_resource *res;
 	char *res_state = NULL;
@@ -2551,6 +2574,19 @@ static int do_client(void)
 		do_client_version();
 		break;
 
+	case ACT_SET_MESSAGE:
+		log_tool("set_message %llu %llu msg %u seq %u",
+			 (unsigned long long)com.host_id,
+			 (unsigned long long)com.host_generation,
+			 com.hm_msg, com.hm_seq);
+		hm.host_id = com.host_id;
+		hm.generation = com.host_generation;
+		hm.msg = com.hm_msg;
+		hm.seq = com.hm_seq;
+		rv = sanlock_set_message(com.lockspace.name, 0, sizeof(struct sanlk_host_message), &hm);
+		log_tool("set_message seq %u done %d", hm.seq, rv);
+		break;
+
 	default:
 		log_tool("action not implemented");
 		rv = -1;
@@ -2611,18 +2647,28 @@ static int do_direct(void)
 			 (unsigned long long)leader.timestamp);
 		log_tool("checksum 0x%0x", leader.checksum);
 		log_tool("io_timeout %u", leader.io_timeout);
-		log_tool("write_id %llu",
-			 (unsigned long long)leader.write_id);
-		log_tool("write_generation %llu",
-			 (unsigned long long)leader.write_generation);
-		log_tool("write_timestamp %llu",
-			 (unsigned long long)leader.write_timestamp);
+
+		if (leader.magic == DELTA_DISK_MAGIC) {
+			log_tool("extra1 0x%016llx",
+			 	 (unsigned long long)leader.write_id);
+			log_tool("extra2 0x%016llx",
+			 	 (unsigned long long)leader.write_generation);
+			log_tool("extra3 0x%016llx",
+			 	 (unsigned long long)leader.write_timestamp);
+		} else {
+			log_tool("write_id %llu",
+			 	 (unsigned long long)leader.write_id);
+			log_tool("write_generation %llu",
+			 	 (unsigned long long)leader.write_generation);
+			log_tool("write_timestamp %llu",
+			 	 (unsigned long long)leader.write_timestamp);
+		}
 		break;
 
 	case ACT_ACQUIRE:
 		rv = direct_acquire(&main_task, com.io_timeout_arg,
 				    com.res_args[0], com.num_hosts,
-				    com.local_host_id, com.local_host_generation,
+				    com.host_id, com.host_generation,
 				    &leader);
 		log_tool("acquire done %d", rv);
 		break;

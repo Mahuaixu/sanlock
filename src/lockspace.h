@@ -27,5 +27,8 @@ int rem_lockspace_wait(struct sanlk_lockspace *ls, unsigned int space_id);
 void free_lockspaces(int wait);
 int get_lockspaces(char *buf, int *len, int *count, int maxlen);
 int get_hosts(struct sanlk_lockspace *ls, char *buf, int *len, int *count, int maxlen);
+void host_message_from_extra(struct sanlk_host_message *hm, struct delta_extra *extra);
+int set_lockspace_message(struct sanlk_lockspace *ls, struct sanlk_host_message *hm);
+
 
 #endif

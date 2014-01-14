@@ -101,6 +101,20 @@ struct sanlk_host {
 	uint32_t flags;
 };
 
+/* hm msg is a bitfield, and messages can be combined. */
+
+#define SANLK_HM_SEQ_DATA 0x00000001
+#define SANLK_HM_WD_RESET 0x00000002
+
+struct sanlk_host_message {
+	uint64_t host_id;
+	uint64_t generation;
+	uint32_t msg;
+	uint32_t seq;
+	uint64_t ack_host;
+	uint32_t ack_seq;
+};
+
 size_t sanlock_path_export(char *dst, const char *src, size_t dstlen);
 size_t sanlock_path_import(char *dst, const char *src, size_t dstlen);
 

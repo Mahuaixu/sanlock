@@ -148,16 +148,21 @@ struct host_status {
 	uint64_t timestamp; /* remote monotime */
 	uint64_t set_bit_time;
 	uint16_t io_timeout;
+	uint32_t host_message_recv_seq;
 };
 
 struct space {
 	struct list_head list;
 	char space_name[NAME_ID_SIZE];
 	uint32_t space_id; /* used to refer to this space instance in log messages */
+	uint32_t io_timeout;
 	uint64_t host_id;
 	uint64_t host_generation;
 	struct sync_disk host_id_disk;
-	uint32_t io_timeout;
+	struct sanlk_host_message host_message_send;
+	uint32_t host_message_send_seq;
+	uint32_t host_message_recv_seq;
+	uint64_t host_message_recv_from;
 	int align_size;
 	int renew_fail;
 	int space_dead;
@@ -180,6 +185,12 @@ struct space_info {
 	uint64_t host_id;
 	uint64_t host_generation;
 	int killing_pids;
+};
+
+struct delta_extra {
+	uint64_t field1;
+	uint64_t field2;
+	uint64_t field3;
 };
 
 #define HOSTID_AIO_CB_SIZE 4
@@ -278,13 +289,15 @@ struct command_line {
 	int gid;				/* -G */
 	int pid;				/* -p */
 	char sort_arg;
-	uint64_t local_host_id;			/* -i */
-	uint64_t local_host_generation;		/* -g */
+	uint64_t host_id;			/* -i */
+	uint64_t host_generation;		/* -g */
 	int num_hosts;				/* -n */
 	int max_hosts;				/* -m */
 	int res_count;
 	int sh_retries;
 	uint32_t force_mode;
+	uint32_t hm_msg;                        /* -m */
+	uint32_t hm_seq;                        /* -n */
 	char our_host_name[SANLK_NAME_LEN+1];
 	char *dump_path;
 	struct sanlk_lockspace lockspace;	/* -s LOCKSPACE */
@@ -326,6 +339,7 @@ enum {
 	ACT_EXAMINE,
 	ACT_GETS,
 	ACT_VERSION,
+	ACT_SET_MESSAGE,
 };
 
 EXTERN int external_shutdown;

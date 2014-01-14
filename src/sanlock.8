@@ -201,6 +201,8 @@ COMMAND can be one of three primary top level choices
 .br
 .BR "sanlock direct" " access storage directly (no coordination with daemon)"
 
+.SS Daemon Command
+
 .BR "sanlock daemon" " [options]"
 
 .BR -D "    "
@@ -239,8 +241,11 @@ use high priority (RR) scheduling
 .BR -l " num"
 use mlockall (0 none, 1 current, 2 current and future)
 
-.BR \-a " 0|1"
-use async i/o
+./" non-aio is untested and may not work
+./" .BR \-a " 0|1"
+./" use async i/o
+
+.SS Client Command
 
 .B "sanlock client"
 .I action
@@ -372,12 +377,35 @@ out the action specified by the requested force_mode.
 Examine requests for all resource leases currently held in the named
 lockspace.  Only lockspace_name is used from the LOCKSPACE argument.
 
+.BR "sanlock client set_message -s" " LOCKSPACE " \
+\fB-i\fP " " \fIhost_id\fP " " \
+\fB-g\fP " " \fIgeneration\fP " "
+.br
+                                        \fB-m\fP \fImsg\fP \fB-n\fP \fIseq\fP
+
+Tell the sanlock daemon to include a message code in the lockspace's
+next delta lease renewal, addressed to the specified host_id.
+Both hosts must be members of LOCKSPACE (only the name is used,
+the host_id in LOCKSPACE is unused).
+.br
+If generation is specified, the message will only apply if the target host
+has the given generation number.  If generation is not specified, sanlock
+will use the current generation of the destination host.
+.br
+If seq is specified, the given sequence number is used for the message.
+If seq is not specified, sanlock generates the message sequence number.
+.br
+msg 1: the host should use its watchdog to reset itself.
+
+.SS Direct Command
+
 .B "sanlock direct"
 .I action
 [options]
 
-.BR \-a " 0|1"
-use async i/o
+./" non-aio is untested and may not work
+./" .BR \-a " 0|1"
+./" use async i/o
 
 .BI -o " sec"
 io timeout in seconds

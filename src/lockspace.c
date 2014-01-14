@@ -222,8 +222,11 @@ int host_info(char *space_name, uint64_t host_id, struct host_status *hs_out)
 	return 0;
 }
 
-static void create_bitmap(struct space *sp, char *bitmap)
+static void create_bitmap_and_extra(struct space *sp, char *bitmap,
+				    struct delta_extra *extra)
 {
+	struct sanlk_host_message *hm;
+	uint64_t extra1 = 0, extra2 = 0, extra3 = 0;
 	uint64_t now;
 	int i;
 	char c;
@@ -247,7 +250,41 @@ static void create_bitmap(struct space *sp, char *bitmap)
 			log_space(sp, "bitmap set host_id %d byte %x", i+1, c);
 		}
 	}
+
+	if (sp->host_message_send.host_id) {
+		hm = &sp->host_message_send;
+		extra1 = hm->host_id & 0xFFFFFFFF;
+		extra1 = (extra1 << 32) | (hm->generation & 0xFFFFFFFF);
+		extra2 = hm->msg;
+		extra2 = (extra2 << 32) | hm->seq;
+	}
+
+	/*
+	 * Including the last received message causes us to skip replies
+	 * when multiple hosts send us a message within a single interval.
+	 * To ensure acks to all, we would need to keep a list of received
+	 * messages, and take the next one off the list here.
+	 */
+
+	extra3 = sp->host_message_recv_from & 0xFFFFFFFF;
+	extra3 = (extra3 << 32) | sp->host_message_recv_seq;
+
+	extra->field1 = extra1;
+	extra->field2 = extra2;
+	extra->field3 = extra3;
+
 	pthread_mutex_unlock(&sp->mutex);
+}
+
+void host_message_from_extra(struct sanlk_host_message *hm,
+			     struct delta_extra *extra)
+{
+	hm->host_id    = extra->field1 >> 32;
+	hm->generation = extra->field1 & 0xFFFFFFFF;
+	hm->msg        = extra->field2 >> 32;
+	hm->seq        = extra->field2 & 0xFFFFFFFF;
+	hm->ack_host   = extra->field3 >> 32;
+	hm->ack_seq    = extra->field3 & 0xFFFFFFFF;
 }
 
 void check_other_leases(struct space *sp, char *buf)
@@ -255,6 +292,8 @@ void check_other_leases(struct space *sp, char *buf)
 	struct leader_record *leader;
 	struct sync_disk *disk;
 	struct host_status *hs;
+	struct delta_extra extra;
+	struct sanlk_host_message hm;
 	char *bitmap;
 	uint64_t now;
 	int i, new;
@@ -280,15 +319,66 @@ void check_other_leases(struct space *sp, char *buf)
 			continue;
 		}
 
+		pthread_mutex_lock(&sp->mutex);
 		hs->owner_id = leader->owner_id;
 		hs->owner_generation = leader->owner_generation;
 		hs->timestamp = leader->timestamp;
 		hs->io_timeout = leader->io_timeout;
 		hs->last_live = now;
+		pthread_mutex_unlock(&sp->mutex);
 
 		if (i+1 == sp->host_id)
 			continue;
 
+		/*
+		 * check if we are target of message
+		 */
+
+		extra.field1 = leader->write_id;
+		extra.field2 = leader->write_generation;
+		extra.field3 = leader->write_timestamp;
+
+		if (!extra.field1)
+			goto check_bitmap;
+
+		host_message_from_extra(&hm, &extra);
+
+		if (hm.host_id != sp->host_id)
+			goto check_bitmap;
+
+		if (hm.generation != sp->host_generation)
+			goto check_bitmap;
+
+		if (!hm.msg && !hm.seq)
+			goto check_bitmap;
+
+		if (!(hm.msg & SANLK_HM_SEQ_DATA) &&
+		     (hm.seq <= hs->host_message_recv_seq))
+			goto check_bitmap;
+
+		if (!(hm.msg & SANLK_HM_SEQ_DATA)) {
+			hs->host_message_recv_seq = hm.seq;
+
+			pthread_mutex_lock(&sp->mutex);
+			sp->host_message_recv_from = i+1;
+			sp->host_message_recv_seq = hm.seq;
+			pthread_mutex_unlock(&sp->mutex);
+		}
+
+		log_level(sp->space_id, 0, NULL, LOG_WARNING,
+			  "host message from %llu %llu msg 0x%08x seq 0x%08x",
+			  (unsigned long long)hs->owner_id,
+			  (unsigned long long)hs->owner_generation,
+			  hm.msg, hm.seq);
+
+		set_message_examine(sp->space_name, &hm,
+				    hs->owner_id, hs->owner_generation);
+
+
+		/*
+		 * check if we are notified in bitmap
+		 */
+ check_bitmap:
 		bitmap = (char *)leader + HOSTID_BITMAP_OFFSET;
 
 		if (!test_id_bit(sp->host_id, bitmap))
@@ -385,6 +475,7 @@ static int corrupt_result(int result)
 static void *lockspace_thread(void *arg_in)
 {
 	char bitmap[HOSTID_BITMAP_SIZE];
+	struct delta_extra extra;
 	struct task task;
 	struct space *sp;
 	struct leader_record leader;
@@ -502,12 +593,14 @@ static void *lockspace_thread(void *arg_in)
 		 */
 
 		memset(bitmap, 0, sizeof(bitmap));
-		create_bitmap(sp, bitmap);
+		memset(&extra, 0, sizeof(extra));
+		create_bitmap_and_extra(sp, bitmap, &extra);
 
 		delta_begin = monotime();
 
 		delta_result = delta_lease_renew(&task, sp, &sp->host_id_disk,
-						 sp->space_name, bitmap,
+						 sp->space_name,
+						 bitmap, &extra,
 						 delta_result, &read_result,
 						 &leader, &leader);
 		delta_length = monotime() - delta_begin;
@@ -1107,6 +1200,50 @@ int get_hosts(struct sanlk_lockspace *ls, char *buf, int *len, int *count, int m
 	*count = host_count;
 
 	return rv;
+}
+
+int set_lockspace_message(struct sanlk_lockspace *ls, struct sanlk_host_message *hm)
+{
+	struct space *sp;
+	struct host_status *hs;
+
+	if (!hm->host_id)
+		return -EINVAL;
+
+	if (!ls->name[0])
+		return -EINVAL;
+
+	pthread_mutex_lock(&spaces_mutex);
+	sp = _search_space(ls->name, NULL, 0, &spaces, NULL, NULL, NULL);
+	if (!sp) {
+		pthread_mutex_unlock(&spaces_mutex);
+		return -ENOENT;
+	}
+	pthread_mutex_unlock(&spaces_mutex);
+
+	pthread_mutex_lock(&sp->mutex);
+
+	/* supply the current generation if caller did not specify the generation */
+	if (!hm->generation) {
+		hs = &(sp->host_status[hm->host_id-1]);
+		hm->generation = hs->owner_generation;
+	}
+
+	if (!hm->msg && !hm->seq) {
+		/* clear message to this node */
+	} else if (!(hm->msg & SANLK_HM_SEQ_DATA) && !hm->seq)
+		hm->seq = ++sp->host_message_send_seq;
+
+	memcpy(&sp->host_message_send, hm, sizeof(struct sanlk_host_message));
+
+	pthread_mutex_unlock(&sp->mutex);
+
+	log_erros(sp, "host message send %llu %llu msg 0x%08x seq 0x%08x",
+		  (unsigned long long)hm->host_id,
+		  (unsigned long long)hm->generation,
+		  hm->msg, hm->seq);
+
+	return 0;
 }
 
 /*

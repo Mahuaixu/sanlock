@@ -278,4 +278,45 @@ int sanlock_test_resource_owners(struct sanlk_resource *res, uint32_t flags,
 
 int sanlock_version(uint32_t flags, uint32_t *version, uint32_t *proto);
 
+/*
+ * Set host_id/generation/msg/seq in our own delta lease when it's next renewed.
+ *
+ * msg values
+ *
+ * SEQ_DATA
+ * - Treat the seq number as opaque data from the caller,
+ *   not as a sequence number.
+ * - The receiving node will not ack this message.
+ * - The receiving node will receive this msg/seq in each renewal
+ *   until it is cleared by the caller.
+ *
+ * WD_RESET
+ * - The host receiving the message should use its watchdog
+ *   device to reset itself as soon as possible.
+ * - The sanlock daemon will do this itself.
+ * 
+ * If seq is zero, the sanlock daemon generates one based on a local
+ * sequential counter, and the value is returned in hm->seq.
+ *
+ * A host receiving a message with a specific sequence number will
+ * not receive another message from the same host until the sequence
+ * number increases.
+ */
+
+int sanlock_set_message(const char *ls_name, uint32_t flags,
+			int len, struct sanlk_host_message *hm);
+
+/*
+ * Same as sanlock_read_lockspace(), but all hm fields are filled in
+ * using the extra fields in the delta lease.
+ *
+ * The hm struct shows the last host message sent from ls->host_id,
+ * and the last host/seq acked by ls->host_id.
+ */
+
+int sanlock_read_lockspace_message(struct sanlk_lockspace *ls,
+				   uint32_t flags, uint32_t *io_timeout,
+				   struct sanlk_host_message *hm);
+
+
 #endif

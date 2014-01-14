@@ -28,6 +28,8 @@
 #include "log.h"
 #include "watchdog.h"
 
+static int watchdog_reset_con;
+
 /*
  * Purpose of watchdog: to forcibly reset the host in the case where a
  * supervised pid is running but sanlock daemon does not renew its lease
@@ -150,5 +152,68 @@ void close_watchdog_file(struct space *sp)
 		return;
 
 	close(sp->wd_fd);
+}
+
+/*
+ * Use the watchdog to reset the host as soon as possible.
+ * Intentionally set the expire time on the connection to
+ * the current time so that the watchdog will expire and
+ * reset as soon as possible.
+ */
+
+void watchdog_reset_host(void)
+{
+	char name[WDMD_NAME_SIZE];
+	uint64_t now;
+	int con, rv;
+
+	if (!com.use_watchdog)
+		return;
+
+	if (watchdog_reset_con) {
+		log_debug("watchdog_reset_host already active");
+		return;
+	}
+
+	con = wdmd_connect();
+	if (con < 0) {
+		log_error("watchdog_reset_host connect failed %d", con);
+		return;
+	}
+
+	memset(name, 0, sizeof(name));
+
+	snprintf(name, WDMD_NAME_SIZE - 1, "sanlock_reset_host");
+
+	rv = wdmd_register(con, name);
+	if (rv < 0) {
+		log_error("watchdog_reset_host register failed %d", rv);
+		goto fail_close;
+	}
+
+	/* the refcount tells wdmd that it should not cleanly exit */
+
+	rv = wdmd_refcount_set(con);
+	if (rv < 0) {
+		log_error("watchdog_reset_host refcount_set failed %d", rv);
+		goto fail_close;
+	}
+
+	now = monotime();
+
+	rv = wdmd_test_live(con, now, now);
+	if (rv < 0) {
+		log_error("watchdog_reset_host test_live failed %d", rv);
+		goto fail_clear;
+	}
+
+	log_error("Resetting host with watchdog");
+	watchdog_reset_con = con;
+	return;
+
+ fail_clear:
+	wdmd_refcount_clear(con);
+ fail_close:
+	close(con);
 }
 

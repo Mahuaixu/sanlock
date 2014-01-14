@@ -15,5 +15,6 @@ int create_watchdog_file(struct space *sp, uint64_t timestamp,
 			 int id_renewal_fail_seconds);
 void unlink_watchdog_file(struct space *sp);
 void close_watchdog_file(struct space *sp);
+void watchdog_reset_host(void);
 
 #endif

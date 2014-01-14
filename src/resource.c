@@ -33,6 +33,7 @@
 #include "timeouts.h"
 #include "mode_block.h"
 #include "helper.h"
+#include "watchdog.h"
 
 /* from cmd.c */
 void send_state_resource(int fd, struct resource *r, const char *list_name, int pid, uint32_t token_id);
@@ -49,6 +50,7 @@ static struct list_head resources_add;
 static struct list_head resources_rem;
 static pthread_mutex_t resource_mutex;
 static pthread_cond_t resource_cond;
+static struct list_head host_messages;
 
 
 static void free_resource(struct resource *r)
@@ -1693,6 +1695,60 @@ int set_resource_examine(char *space_name, char *res_name)
 	return count;
 }
 
+struct recv_message {
+	struct list_head list;
+	uint64_t from_host_id;
+	uint64_t from_generation;
+	struct sanlk_host_message hm;
+};
+
+void set_message_examine(char *space_name GNUC_UNUSED,
+			 struct sanlk_host_message *hm,
+			 uint64_t from_host_id, uint64_t from_generation)
+{
+	struct recv_message *rm;
+
+	rm = malloc(sizeof(struct recv_message));
+	if (!rm) {
+		log_error("set_message_examine no mem");
+		return;
+	}
+
+	memset(rm, 0, sizeof(struct recv_message));
+	memcpy(&rm->hm, hm, sizeof(struct sanlk_host_message));
+	rm->from_host_id = from_host_id;
+	rm->from_generation = from_generation;
+
+	pthread_mutex_lock(&resource_mutex);
+	list_add_tail(&rm->list, &host_messages);
+	resource_thread_work = 1;
+	pthread_cond_signal(&resource_cond);
+	pthread_mutex_unlock(&resource_mutex);
+}
+
+static void resource_thread_messages(void)
+{
+	struct recv_message *rm, *safe;
+
+	list_for_each_entry_safe(rm, safe, &host_messages, list) {
+		list_del(&rm->list);
+
+		log_debug("examine message from %llu %llu msg 0x%08x seq 0x%08x",
+			  (unsigned long long)rm->from_host_id,
+			  (unsigned long long)rm->from_generation,
+			  rm->hm.msg, rm->hm.seq);
+
+		if (rm->hm.msg & SANLK_HM_WD_RESET) {
+			log_error("Host reset request from host_id %llu gen %llu",
+				  (unsigned long long)rm->from_host_id,
+				  (unsigned long long)rm->from_generation);
+			watchdog_reset_host();
+		}
+
+		free(rm);
+	}
+}
+
 /*
  * resource_thread
  * - on-disk lease release for pid's that exit without doing release
@@ -1896,6 +1952,10 @@ static void *resource_thread(void *arg GNUC_UNUSED)
 			pthread_cond_wait(&resource_cond, &resource_mutex);
 		}
 
+		/* process any host messages that have been received */
+		resource_thread_messages();
+
+
 		/* FIXME: it's not nice how we copy a bunch of stuff
 		 * from token to r so that we can later copy it back from
 		 * r into a temp token.  The whole duplication of stuff
@@ -1994,6 +2054,7 @@ int setup_token_manager(void)
 	INIT_LIST_HEAD(&resources_add);
 	INIT_LIST_HEAD(&resources_rem);
 	INIT_LIST_HEAD(&resources_held);
+	INIT_LIST_HEAD(&host_messages);
 
 	rv = pthread_create(&resource_pt, NULL, resource_thread, NULL);
 	if (rv)
