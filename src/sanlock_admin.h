@@ -32,6 +32,10 @@
 #define SANLK_HOST_DEAD    0x00000005
 #define SANLK_HOST_MASK    0x0000000F /* select SANLK_HOST_ from flags */
 
+int sanlock_reg_lockspace(struct sanlk_lockspace *ls, uint32_t flags);
+
+int sanlock_get_callback(int fd, uint32_t flags, struct sanlk_callback *cb, int cb_size);
+
 /*
  * add_lockspace returns:
  * 0: the lockspace has been added successfully

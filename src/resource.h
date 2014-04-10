@@ -27,7 +27,7 @@ int request_token(struct task *task, struct token *token, uint32_t force_mode,
 
 int set_resource_examine(char *space_name, char *res_name);
 
-void set_message_examine(char *space_name, struct sanlk_host_message *hm,
+void set_message_examine(uint32_t space_id, struct sanlk_host_message *hm,
 			 uint64_t from_host_id, uint64_t from_generation);
 
 int res_set_lvb(struct sanlk_resource *res, char *lvb, int lvblen);

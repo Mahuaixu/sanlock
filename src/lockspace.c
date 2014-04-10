@@ -111,6 +111,23 @@ int lockspace_info(const char *space_name, struct space_info *spi)
 	return rv;
 }
 
+int lockspace_callback_fd(int space_id)
+{
+	struct space *sp;
+	int fd = -ENOENT;
+
+	pthread_mutex_lock(&spaces_mutex);
+	list_for_each_entry(sp, &spaces, list) {
+		if (sp->space_id != space_id)
+			continue;
+		fd = sp->callback_fd;
+		break;
+	}
+	pthread_mutex_unlock(&spaces_mutex);
+
+	return fd;
+}
+
 int lockspace_disk(char *space_name, struct sync_disk *disk)
 {
 	struct space *sp;
@@ -371,7 +388,7 @@ void check_other_leases(struct space *sp, char *buf)
 			  (unsigned long long)hs->owner_generation,
 			  hm.msg, hm.seq);
 
-		set_message_examine(sp->space_name, &hm,
+		set_message_examine(sp->space_id, &hm,
 				    hs->owner_id, hs->owner_generation);
 
 
@@ -670,6 +687,9 @@ static void *lockspace_thread(void *arg_in)
 	if (opened)
 		close(sp->host_id_disk.fd);
 
+	if (sp->callback_fd != -1)
+		close(sp->callback_fd);
+
 	close_task_aio(&task);
 	return NULL;
 }
@@ -705,6 +725,7 @@ int add_lockspace_start(struct sanlk_lockspace *ls, uint32_t io_timeout, struct 
 	sp->host_id_disk.fd = -1;
 	sp->host_id = ls->host_id;
 	sp->io_timeout = io_timeout;
+	sp->callback_fd = -1;
 	pthread_mutex_init(&sp->mutex, NULL);
 
 	pthread_mutex_lock(&spaces_mutex);
@@ -1242,6 +1263,31 @@ int set_lockspace_message(struct sanlk_lockspace *ls, struct sanlk_host_message 
 		  (unsigned long long)hm->host_id,
 		  (unsigned long long)hm->generation,
 		  hm->msg, hm->seq);
+
+	return 0;
+}
+
+int register_lockspace_fd(struct sanlk_lockspace *ls, int fd)
+{
+	struct space *sp;
+
+	if (!ls->name[0])
+		return -EINVAL;
+
+	pthread_mutex_lock(&spaces_mutex);
+	sp = _search_space(ls->name, NULL, 0, &spaces, NULL, NULL, NULL);
+	if (!sp) {
+		pthread_mutex_unlock(&spaces_mutex);
+		return -ENOENT;
+	}
+	pthread_mutex_unlock(&spaces_mutex);
+
+	pthread_mutex_lock(&sp->mutex);
+	if (sp->callback_fd != -1)
+		close(sp->callback_fd);
+	sp->callback_fd = dup(fd);
+	log_space(sp, "register cb fd %d from fd %d", sp->callback_fd, fd);
+	pthread_mutex_unlock(&sp->mutex);
 
 	return 0;
 }

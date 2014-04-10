@@ -15,6 +15,7 @@
 
 #define SM_MAGIC 0x04282010
 #define SM_PROTO 0x00000001
+#define SM_CB_PROTO 0x00000001
 
 #define MAX_CLIENT_MSG (1024 * 1024) /* TODO: this is random */
 
@@ -49,6 +50,8 @@ enum {
 	SM_CMD_VERSION		 = 28,
 	SM_CMD_SET_MESSAGE       = 29,
 	SM_CMD_READ_LOCKSPACE_MESSAGE = 30,
+	SM_CMD_REG_LOCKSPACE     = 31,
+	SM_CMD_CALLBACK          = 32,
 };
 
 struct sm_header {

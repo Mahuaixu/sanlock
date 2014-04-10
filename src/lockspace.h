@@ -6,8 +6,8 @@
  * of the GNU General Public License v2 or (at your option) any later version.
  */
 
-#ifndef __HOST_ID_H__
-#define __HOST_ID__H__
+#ifndef __LOCKSPACE_H__
+#define __LOCKSPACE_H__
 
 struct space *find_lockspace(const char *name);
 int _lockspace_info(const char *space_name, struct space_info *spi);
@@ -29,6 +29,7 @@ int get_lockspaces(char *buf, int *len, int *count, int maxlen);
 int get_hosts(struct sanlk_lockspace *ls, char *buf, int *len, int *count, int maxlen);
 void host_message_from_extra(struct sanlk_host_message *hm, struct delta_extra *extra);
 int set_lockspace_message(struct sanlk_lockspace *ls, struct sanlk_host_message *hm);
-
+int register_lockspace_fd(struct sanlk_lockspace *ls, int fd);
+int lockspace_callback_fd(int space_id);
 
 #endif

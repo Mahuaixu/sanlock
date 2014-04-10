@@ -115,6 +115,25 @@ struct sanlk_host_message {
 	uint32_t ack_seq;
 };
 
+#define SANLK_CB_HOST_MESSAGE 0x00000001
+
+struct sanlk_callback_hm {
+	uint32_t type;
+	uint32_t flags;
+	uint32_t msg;
+	uint32_t seq;
+	uint64_t host_id;
+	uint64_t generation;
+	uint64_t from_host_id;
+	uint64_t from_generation;
+};
+
+struct sanlk_callback {
+	union {
+		struct sanlk_callback_hm hm;
+	};
+};
+
 size_t sanlock_path_export(char *dst, const char *src, size_t dstlen);
 size_t sanlock_path_import(char *dst, const char *src, size_t dstlen);
 

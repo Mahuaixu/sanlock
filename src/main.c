@@ -1178,6 +1178,7 @@ static void process_connection(int ci)
 	case SM_CMD_LOG_DUMP:
 	case SM_CMD_GET_LOCKSPACES:
 	case SM_CMD_GET_HOSTS:
+	case SM_CMD_REG_LOCKSPACE:
 		call_cmd_daemon(ci, &h, client_maxi);
 		break;
 	case SM_CMD_ADD_LOCKSPACE:

@@ -844,6 +844,86 @@ int sanlock_set_message(const char *ls_name, uint32_t flags,
 	return rv;
 }
 
+int sanlock_reg_lockspace(struct sanlk_lockspace *ls, uint32_t flags)
+{
+	struct sm_header h;
+	int rv, fd;
+
+	if (!ls->name[0])
+		return -EINVAL;
+
+	rv = connect_socket(&fd);
+	if (rv < 0)
+		return rv;
+
+	rv = send_header(fd, SM_CMD_REG_LOCKSPACE, flags, 0, 0, 0);
+	if (rv < 0) {
+		close(fd);
+		return rv;
+	}
+
+	rv = send(fd, ls, sizeof(struct sanlk_lockspace), 0);
+	if (rv < 0) {
+		close(fd);
+		return rv;
+	}
+
+	memset(&h, 0, sizeof(struct sm_header));
+
+	rv = recv(fd, &h, sizeof(h), MSG_WAITALL);
+	if (rv < 0) {
+		rv = -errno;
+		close(fd);
+		return rv;
+	}
+
+	if (rv != sizeof(h)) {
+		rv = -1;
+		close(fd);
+		return rv;
+	}
+
+	rv = (int)h.data;
+	if (rv < 0) {
+		close(fd);
+		return rv;
+	}
+
+	return fd;
+}
+
+int sanlock_get_callback(int fd, uint32_t flags GNUC_UNUSED,
+			 struct sanlk_callback *cb, int cb_size)
+{
+	struct sm_header h;
+	struct sanlk_callback callback;
+	int rv, len;
+
+	rv = recv(fd, &h, sizeof(h), MSG_WAITALL);
+	if (rv < 0)
+		return -errno;
+
+	if (rv != sizeof(h))
+		return -1;
+
+	len = h.length - sizeof(h);
+
+	if (len > sizeof(callback))
+		return -EINVAL;
+
+	memset(&callback, 0, sizeof(callback));
+
+	rv = recv(fd, &callback, len, MSG_WAITALL);
+	if (rv < 0)
+		return -errno;
+
+	if (len > cb_size)
+		len = cb_size;
+
+	memcpy(cb, &callback, len);
+	return 0;
+}
+
 /* old api */
 int sanlock_init(struct sanlk_lockspace *ls,
 		 struct sanlk_resource *res,

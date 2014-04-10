@@ -170,6 +170,7 @@ struct space {
 	int external_remove;
 	int thread_stop;
 	int wd_fd;
+	int callback_fd;
 	pthread_t thread;
 	pthread_mutex_t mutex; /* protects lease_status, thread_stop  */
 	struct lease_status lease_status;

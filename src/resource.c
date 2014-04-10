@@ -22,8 +22,11 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "sanlock_internal.h"
+#include "sanlock_sock.h"
 #include "diskio.h"
 #include "log.h"
 #include "paxos_lease.h"
@@ -1697,13 +1700,13 @@ int set_resource_examine(char *space_name, char *res_name)
 
 struct recv_message {
 	struct list_head list;
+	uint32_t space_id;
 	uint64_t from_host_id;
 	uint64_t from_generation;
 	struct sanlk_host_message hm;
 };
 
-void set_message_examine(char *space_name GNUC_UNUSED,
-			 struct sanlk_host_message *hm,
+void set_message_examine(uint32_t space_id, struct sanlk_host_message *hm,
 			 uint64_t from_host_id, uint64_t from_generation)
 {
 	struct recv_message *rm;
@@ -1716,6 +1719,7 @@ void set_message_examine(char *space_name GNUC_UNUSED,
 
 	memset(rm, 0, sizeof(struct recv_message));
 	memcpy(&rm->hm, hm, sizeof(struct sanlk_host_message));
+	rm->space_id = space_id;
 	rm->from_host_id = from_host_id;
 	rm->from_generation = from_generation;
 
@@ -1724,6 +1728,47 @@ void set_message_examine(char *space_name GNUC_UNUSED,
 	resource_thread_work = 1;
 	pthread_cond_signal(&resource_cond);
 	pthread_mutex_unlock(&resource_mutex);
+}
+
+static void send_callback(struct recv_message *rm)
+{
+	struct sm_header h;
+	struct sanlk_callback_hm cb;
+	int fd, rv;
+
+	fd = lockspace_callback_fd(rm->space_id);
+	if (fd < 0)
+		return;
+
+	memset(&h, 0, sizeof(h));
+	memset(&cb, 0, sizeof(cb));
+
+	h.magic = SM_MAGIC;
+	h.version = SM_CB_PROTO;
+	h.cmd = SM_CMD_CALLBACK;
+	h.length = sizeof(h) + sizeof(cb);
+
+	cb.type = SANLK_CB_HOST_MESSAGE;
+	cb.from_host_id = rm->from_host_id;
+	cb.from_generation = rm->from_generation;
+	cb.host_id = rm->hm.host_id;
+	cb.generation = rm->hm.generation;
+	cb.msg = rm->hm.msg;
+	cb.seq = rm->hm.seq;
+
+	rv = send(fd, &h, sizeof(h), MSG_NOSIGNAL | MSG_DONTWAIT);
+	if (rv == -EAGAIN) {
+		log_error("close callback fd %d sp %d", fd, rm->space_id);
+		close(fd);
+		return;
+	}
+
+	rv = send(fd, &cb, sizeof(cb), MSG_NOSIGNAL | MSG_DONTWAIT);
+	if (rv == -EAGAIN) {
+		log_error("close callback fd %d sp %d", fd, rm->space_id);
+		close(fd);
+		return;
+	}
 }
 
 static void resource_thread_messages(void)
@@ -1737,6 +1782,8 @@ static void resource_thread_messages(void)
 			  (unsigned long long)rm->from_host_id,
 			  (unsigned long long)rm->from_generation,
 			  rm->hm.msg, rm->hm.seq);
+
+		send_callback(rm);
 
 		if (rm->hm.msg & SANLK_HM_WD_RESET) {
 			log_error("Host reset request from host_id %llu gen %llu",

@@ -2443,6 +2443,33 @@ static void cmd_version(int ci GNUC_UNUSED, int fd, struct sm_header *h_recv)
 	send(fd, h_recv, sizeof(struct sm_header), MSG_NOSIGNAL);
 }
 
+static void cmd_reg_lockspace(int fd, struct sm_header *h_recv)
+{
+	struct sm_header h;
+	struct sanlk_lockspace lockspace;
+	int rv;
+
+	log_debug("cmd_reg_lockspace fd %d", fd);
+
+	memcpy(&h, h_recv, sizeof(struct sm_header));
+	h.version = SM_PROTO;
+	h.length = sizeof(struct sm_header);
+
+	rv = recv(fd, &lockspace, sizeof(struct sanlk_lockspace), MSG_WAITALL);
+	if (rv != sizeof(struct sanlk_lockspace)) {
+		h.data = -ENOTCONN;
+		goto out;
+	}
+
+	rv = register_lockspace_fd(&lockspace, fd);
+
+	h.data = rv;
+	h.data2 = fd;
+out:
+	log_debug("cmd_reg_lockspace fd %d rv %d", fd, rv);
+	send(fd, &h, sizeof(struct sm_header), MSG_NOSIGNAL);
+}
+
 static int get_peer_pid(int fd, int *pid)
 {
 	struct ucred cred;
@@ -2530,6 +2557,10 @@ void call_cmd_daemon(int ci, struct sm_header *h_recv, int client_maxi)
 	case SM_CMD_GET_HOSTS:
 		strcpy(client[ci].owner_name, "get_hosts");
 		cmd_get_hosts(fd, h_recv);
+		break;
+	case SM_CMD_REG_LOCKSPACE:
+		strcpy(client[ci].owner_name, "reg_lockspace");
+		cmd_reg_lockspace(fd, h_recv);
 		break;
 	};
 
