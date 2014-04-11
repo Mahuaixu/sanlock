@@ -52,6 +52,7 @@ enum {
 	SM_CMD_READ_LOCKSPACE_MESSAGE = 30,
 	SM_CMD_REG_LOCKSPACE     = 31,
 	SM_CMD_CALLBACK          = 32,
+	SM_CMD_SHUTDOWN_WAIT     = 33,
 };
 
 struct sm_header {

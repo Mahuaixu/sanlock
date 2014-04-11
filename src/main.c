@@ -840,6 +840,8 @@ static int main_loop(void)
 
 	free_lockspaces(1);
 
+	daemon_shutdown_reply();
+
 	return 0;
 }
 
@@ -1197,6 +1199,7 @@ static void process_connection(int ci)
 	case SM_CMD_SET_LVB:
 	case SM_CMD_GET_LVB:
 	case SM_CMD_SET_MESSAGE:
+	case SM_CMD_SHUTDOWN_WAIT:
 		rv = client_suspend(ci);
 		if (rv < 0)
 			return;
@@ -1819,7 +1822,7 @@ static void print_usage(void)
 	printf("sanlock client host_status -s LOCKSPACE [-D]\n");
 	printf("sanlock client set_message -s LOCKSPACE -i <host_id> [-g gen] -m <msg> [-n <seq>]\n");
 	printf("sanlock client log_dump\n");
-	printf("sanlock client shutdown [-f 0|1]\n");
+	printf("sanlock client shutdown [-f 0|1] [-w 0|1]\n");
 	printf("sanlock client init -s LOCKSPACE | -r RESOURCE\n");
 	printf("sanlock client read -s LOCKSPACE | -r RESOURCE\n");
 	printf("sanlock client align -s LOCKSPACE\n");
@@ -2054,6 +2057,7 @@ static int read_command_line(int argc, char *argv[])
 			break;
 		case 'w':
 			com.use_watchdog = atoi(optionarg);
+			com.wait = atoi(optionarg);
 			break;
 		case 'h':
 			if (com.action == ACT_GETS || com.action == ACT_CLIENT_READ)
@@ -2423,8 +2427,8 @@ static int do_client(void)
 		break;
 
 	case ACT_SHUTDOWN:
-		log_tool("shutdown");
-		rv = sanlock_shutdown(com.force_mode);
+		log_tool("shutdown force %d wait %d", com.force_mode, com.wait);
+		rv = sanlock_shutdown(com.force_mode, com.wait);
 		log_tool("shutdown done %d", rv);
 		break;
 
