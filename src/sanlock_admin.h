@@ -342,6 +342,7 @@ int sanlock_version(uint32_t flags, uint32_t *version, uint32_t *proto);
 #define SANLK_SETEV_CUR_GENERATION 0x00000001
 #define SANLK_SETEV_CLEAR_HOSTID   0x00000002
 #define SANLK_SETEV_CLEAR_EVENT    0x00000004
+#define SANLK_SETEV_ALL_HOSTS      0x00000008
 
 int sanlock_reg_event(const char *ls_name, struct sanlk_host_event *he, uint32_t flags);
 int sanlock_end_event(int fd, const char *ls_name, uint32_t flags);

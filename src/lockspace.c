@@ -251,11 +251,11 @@ static void create_bitmap_and_extra(struct space *sp, char *bitmap, struct delta
 			continue;
 
 		if (now - sp->host_status[i].set_bit_time > sp->set_bitmap_seconds) {
-			log_space(sp, "bitmap clear host_id %d", i+1);
+			/* log_space(sp, "bitmap clear host_id %d", i+1); */
 			sp->host_status[i].set_bit_time = 0;
 		} else {
 			set_id_bit(i+1, bitmap, &c);
-			log_space(sp, "bitmap set host_id %d byte %x", i+1, c);
+			/* log_space(sp, "bitmap set host_id %d byte %x", i+1, c); */
 		}
 	}
 
@@ -1324,6 +1324,11 @@ int lockspace_set_event(struct sanlk_lockspace *ls, struct sanlk_host_event *he,
 	sp->set_event_time = now;
 	sp->host_status[he->host_id-1].set_bit_time = now;
 	memcpy(&sp->host_event, he, sizeof(struct sanlk_host_event));
+
+	if (flags & SANLK_SETEV_ALL_HOSTS) {
+		for (i = 0; i < DEFAULT_MAX_HOSTS; i++)
+			sp->host_status[i].set_bit_time = now;
+	}
 out:
 	pthread_mutex_unlock(&sp->mutex);
 	return 0;
