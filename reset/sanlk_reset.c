@@ -559,7 +559,8 @@ int main(int argc, char *argv[])
 		if (i == optind) {
 			cmd = argv[i];
 		} else if (ls_count == MAX_LS) {
-			fprintf(stderr, "ignore lockspace_name %s\n", argv[i]);
+			fprintf(stderr, "too many lockspaces (max %d)\n", MAX_LS);
+			exit(2);
 		} else {
 			ls_names[ls_count] = argv[i];
 			ls_count++;
