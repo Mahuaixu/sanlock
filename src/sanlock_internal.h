@@ -323,6 +323,8 @@ struct command_line {
 	char *dump_path;
 	struct sanlk_lockspace lockspace;	/* -s LOCKSPACE */
 	struct sanlk_resource *res_args[SANLK_MAX_RESOURCES]; /* -r RESOURCE */
+	gid_t *groups;
+	int groups_count;
 };
 
 EXTERN struct command_line com;

@@ -1429,66 +1429,54 @@ static void setup_limits(void)
 	}
 }
 
-static void setup_groups(void)
+static int prepare_groups(void)
 {
-	int rv, i, j, h;
-	int pngroups, sngroups, ngroups_max;
-	gid_t *pgroup, *sgroup;
+	int rv;
+	int ngroups, ngroups_max;
+	gid_t *groups;
 
 	if (!com.uname || !com.gname)
-		return;
+		return -1;
 
 	ngroups_max = sysconf(_SC_NGROUPS_MAX);
 	if (ngroups_max < 0) {
 		log_error("cannot get the max number of groups %i", errno);
-		return;
+		return -1;
 	}
 
-	pgroup = malloc(ngroups_max * 2 * sizeof(gid_t));
-	if (!pgroup) {
+	groups = malloc(ngroups_max * sizeof(*groups));
+	if (!groups) {
 		log_error("cannot malloc the group list %i", errno);
 		exit(EXIT_FAILURE);
 	}
 
-	pngroups = getgroups(ngroups_max, pgroup);
-	if (pngroups < 0) {
-		log_error("cannot get the process groups %i", errno);
-		goto out;
-	}
+	ngroups = ngroups_max;
 
-	sgroup = pgroup + ngroups_max;
-	sngroups = ngroups_max;
-
-	rv = getgrouplist(com.uname, com.gid, sgroup, &sngroups);
+	rv = getgrouplist(com.uname, com.gid, groups, &ngroups);
 	if (rv < 0) {
-		log_error("cannot get the user %s groups %i", com.uname, errno);
-		goto out;
+		log_error("too many groups for user %s (ngroups=%d "
+			  "ngroups_max=%d)", com.uname, rv, ngroups_max);
+		free(groups);
+		return -1;
 	}
 
-	for (i = 0, j = pngroups; i < sngroups; i++) {
-		if (j >= ngroups_max) {
-			log_error("too many groups for the user %s", com.uname);
-			break;
-		}
+	com.groups = groups;
+	com.groups_count = ngroups;
 
-		/* check if the groups is already present in the list */
-		for (h = 0; h < j; h++) {
-			if (pgroup[h] == sgroup[i]) {
-				goto skip_gid;
-			}
-		}
+	return 0;
+}
 
-		pgroup[j] = sgroup[i];
-		j++;
+static void setup_groups(void)
+{
+	int rv;
 
- skip_gid:
-		; /* skipping the gid because it's already present */
-	}
+	if (!com.uname || !com.gname)
+		return;
 
-	rv = setgroups(j, pgroup);
+	rv = setgroups(com.groups_count, com.groups);
 	if (rv < 0) {
 		log_error("cannot set the user %s groups %i", com.uname, errno);
-		goto out;
+		return;
 	}
 
 	rv = setgid(com.gid);
@@ -1509,9 +1497,13 @@ static void setup_groups(void)
 	if (rv < 0) {
 		log_error("cannot set dumpable process errno %i", errno);
 	}
+}
 
- out:
-	free(pgroup);
+static void teardown_groups(void)
+{
+	free(com.groups);
+	com.groups = NULL;
+	com.groups_count = 0;
 }
 
 static void setup_signals(void)
@@ -1662,6 +1654,9 @@ static int do_daemon(void)
 
 	/* TODO: copy comprehensive daemonization method from libvirtd */
 
+	/* Minimize startup race by preparing the groups before daemonizing. */
+	prepare_groups();
+
 	if (!com.debug) {
 		if (daemon(0, 0) < 0) {
 			log_tool("cannot fork daemon\n");
@@ -1700,6 +1695,7 @@ static int do_daemon(void)
 	setup_host_name();
 
 	setup_groups();
+	teardown_groups();
 
 	log_level(0, 0, NULL, LOG_WARNING, "sanlock daemon started %s host %s",
 		  VERSION, our_host_name_global);
@@ -3212,6 +3208,9 @@ int main(int argc, char *argv[])
 		com.uid = DEFAULT_SOCKET_UID;
 		com.gid = DEFAULT_SOCKET_GID;
 	}
+
+	com.groups = NULL;
+	com.groups_count = 0;
 
 	memset(&main_task, 0, sizeof(main_task));
 
