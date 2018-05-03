@@ -13,8 +13,11 @@
 #define PAXOS_ACQUIRE_QUIET_FAIL	0x00000002
 #define PAXOS_ACQUIRE_SHARED		0x00000004
 #define PAXOS_ACQUIRE_OWNER_NOWAIT	0x00000008
+#define PAXOS_ACQUIRE_DEBUG_ALL		0x00000010
 
 uint32_t leader_checksum(struct leader_record *lr);
+
+uint32_t dblock_checksum(struct paxos_dblock *pd);
 
 int paxos_lease_leader_read(struct task *task,
 			    struct token *token,
@@ -25,6 +28,7 @@ int paxos_lease_acquire(struct task *task,
 			struct token *token,
 			uint32_t flags,
 		        struct leader_record *leader_ret,
+			struct paxos_dblock *dblock_ret,
 		        uint64_t acquire_lver,
 		        int new_num_hosts);
 

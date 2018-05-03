@@ -1,0 +1,12 @@
+language: python
+
+before_install:
+    - sudo apt-get -qq update
+    - sudo apt-get install -y make gcc libaio-dev libblkid-dev
+
+script:
+    - make -C wdmd
+    - make -C src
+    - make -C python inplace
+    - source tests/env.sh
+    - pytest

@@ -27,7 +27,7 @@ int resource_orphan_count(char *space_name);
 void check_mode_block(struct token *token, uint64_t next_lver, int q, char *dblock);
 
 /* locks resource_mutex */
-int convert_token(struct task *task, struct sanlk_resource *res, struct token *cl_token);
+int convert_token(struct task *task, struct sanlk_resource *res, struct token *cl_token, uint32_t cmd_flags);
 
 /* locks resource_mutex */
 int acquire_token(struct task *task, struct token *token, uint32_t cmd_flags,
@@ -60,13 +60,14 @@ int read_resource_owners(struct task *task, struct token *token,
                          char **send_buf, int *send_len, int *count);
 
 /* locks resource_mutex */
-void free_resources(void);
+void rem_resources(void);
 
 /* locks resource_mutex */
 int release_orphan(struct sanlk_resource *res);
 
 /* locks resource_mutex */
 void purge_resource_orphans(char *space_name);
+void purge_resource_free(char *space_name);
 
 /* locks resource_mutex */
 void add_host_event(uint32_t space_id, struct sanlk_host_event *he,

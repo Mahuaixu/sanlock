@@ -18,7 +18,7 @@
 #define PAXOS_DISK_MAGIC 0x06152010
 #define PAXOS_DISK_CLEAR 0x11282016
 #define PAXOS_DISK_VERSION_MAJOR 0x00060000
-#define PAXOS_DISK_VERSION_MINOR 0x00000002
+#define PAXOS_DISK_VERSION_MINOR 0x00000003
 
 #define DELTA_DISK_MAGIC 0x12212010
 #define DELTA_DISK_VERSION_MAJOR 0x00030000
@@ -73,6 +73,9 @@ struct leader_record {
 #define LEADER_RECORD_MAX 256
 #define HOSTID_BITMAP_OFFSET 256
 #define HOSTID_BITMAP_SIZE 256
+
+/* the request record is in the sector following the leader record
+   for a paxos lease. */
 
 #define REQ_DISK_MAGIC 0x08292011
 #define REQ_DISK_VERSION_MAJOR 0x00010000

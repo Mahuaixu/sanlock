@@ -43,6 +43,10 @@
 
 #define COMMAND_MAX 4096
 
+#define SANLOCK_RUN_DIR "SANLOCK_RUN_DIR"
+#define DEFAULT_RUN_DIR "/var/run/sanlock"
+#define SANLOCK_PRIVILEGED "SANLOCK_PRIVILEGED"
+
 #define SANLK_LOG_DIR "/var/log"
 #define SANLK_LOGFILE_NAME "sanlock.log"
 #define SANLK_LOCKFILE_NAME "sanlock.pid"
@@ -91,6 +95,7 @@ struct token {
 	/* copied from the sp with r.lockspace_name */
 	uint64_t host_id;
 	uint64_t host_generation;
+	uint32_t space_id;
 	uint32_t io_timeout;
 
 	/* internal */
@@ -98,7 +103,10 @@ struct token {
 	struct resource *resource;
 	int pid;
 	uint32_t flags;  /* be careful to avoid using this from different threads */
-	uint32_t token_id; /* used to refer to this token instance in log messages */
+	uint32_t token_id;
+	uint32_t res_id;
+	int sector_size;
+	int align_size;
 	int space_dead; /* copied from sp->space_dead, set by main thread */
 	int shared_count; /* set during ballot by paxos_lease_acquire */
 	char shared_bitmap[HOSTID_BITMAP_SIZE]; /* bit set for host_id with SH */
@@ -123,13 +131,16 @@ struct resource {
 	uint64_t host_generation;
 	uint32_t io_timeout;
 	int pid;                     /* copied from token when ex */
+	int sector_size;
+	uint32_t res_id;
+	uint32_t reused;
 	uint32_t flags;
-	uint32_t release_token_id;   /* copy to temp token (tt) for log messages */
 	uint64_t thread_release_retry;
 	char *lvb;
 	char killpath[SANLK_HELPER_PATH_LEN]; /* copied from client */
 	char killargs[SANLK_HELPER_ARGS_LEN]; /* copied from client */
 	struct leader_record leader; /* copy of last leader_record we wrote */
+	struct paxos_dblock dblock;  /* copy of last paxos_dblock we wrote */
 	struct sanlk_resource r;
 };
 
@@ -187,6 +198,7 @@ struct space {
 	uint32_t flags; /* SP_ */
 	uint32_t used_retries;
 	uint32_t renewal_read_extend_sec; /* defaults to io_timeout */
+	int sector_size;
 	int align_size;
 	int renew_fail;
 	int space_dead;
@@ -215,6 +227,8 @@ struct space_info {
 	uint32_t io_timeout;
 	uint64_t host_id;
 	uint64_t host_generation;
+	int sector_size;
+	int align_size;
 	int killing_pids;
 };
 
@@ -302,11 +316,15 @@ struct command_line {
 	int action;				/* ACT_ */
 	int debug;
 	int debug_renew;
+	int debug_io_submit;
+	int debug_io_complete;
+	int paxos_debug_all;
 	int quiet_fail;
 	int wait;
 	int use_watchdog;
 	int high_priority;		/* -h */
 	int get_hosts;			/* -h */
+	int names_log_priority;
 	int mlock_level;
 	int max_worker_threads;
 	int aio_arg;
@@ -319,6 +337,7 @@ struct command_line {
 	int used;
 	int all;
 	int clear_arg;
+	int sector_size;
 	char *uname;			/* -U */
 	int uid;				/* -U */
 	char *gname;			/* -G */
@@ -409,6 +428,17 @@ EXTERN uint8_t sanlock_version_minor;
 EXTERN uint8_t sanlock_version_patch;
 EXTERN uint8_t sanlock_version_build;
 EXTERN uint32_t sanlock_version_combined;
+
+#define ONEMB 1048576
+
+static inline int sector_size_to_align_size(int sector_size)
+{
+	if (sector_size == 512)
+		return ONEMB;
+	if (sector_size == 4096)
+		return 8 * ONEMB;
+	return 0;
+}
 
 #endif
 

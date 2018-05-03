@@ -29,10 +29,12 @@
 #include <sys/un.h>
 
 #include "sanlock.h"
+#include "sanlock_internal.h"
 #include "sanlock_resource.h"
 #include "sanlock_admin.h"
 #include "sanlock_sock.h"
 #include "sanlock_rv.h"
+#include "env.h"
 
 #ifndef GNUC_UNUSED
 #define GNUC_UNUSED __attribute__((__unused__))
@@ -42,13 +44,17 @@ static int connect_socket(int *sock_fd)
 {
 	int rv, s;
 	struct sockaddr_un addr;
+	static const char *run_dir;
 
 	*sock_fd = -1;
 	s = socket(AF_LOCAL, SOCK_STREAM, 0);
 	if (s < 0)
 		return -errno;
 
-	rv = sanlock_socket_address(&addr);
+	if (run_dir == NULL)
+		run_dir = env_get("SANLOCK_RUN_DIR", DEFAULT_RUN_DIR);
+
+	rv = sanlock_socket_address(run_dir, &addr);
 	if (rv < 0) {
 		close(s);
 		return rv;
@@ -2014,6 +2020,8 @@ const char *sanlock_strerror(int rv)
 		return "Lease write error in dblock";
 	case SANLK_DBLOCK_MBAL:
 		return "Lease was acquired by another host in current ballot";
+	case SANLK_DBLOCK_LVER:
+		return "Lease was acquired by another host in new ballot";
 	case SANLK_DBLOCK_CHECKSUM:
 		return "Lease checksum error in dblock";
 	case SANLK_LEADER_READ:
@@ -2036,8 +2044,6 @@ const char *sanlock_strerror(int rv)
 		return "Lease num_hosts is incorrect";
 	case SANLK_LEADER_CHECKSUM:
 		return "Lease checksum error in leader";
-	case SANLK_ACQUIRE_LVER:
-		return "Lease leader version is unmatching";
 	case SANLK_ACQUIRE_LOCKSPACE:
 		return "Lease lockspace is not found";
 	case SANLK_ACQUIRE_IDDISK:

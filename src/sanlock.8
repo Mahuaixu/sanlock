@@ -363,10 +363,7 @@ Allocate shared storage for sanlock leases.
 This example assumes 512 byte sectors on the device, in which case the
 lockspace needs 1MB and each resource needs 1MB.
 
-.nf
-# vgcreate vg /dev/sdb
-# lvcreate -n leases -L 1GB vg
-.fi
+The example shared block device accessible to all hosts is /dev/leases.
 
 .IP 2. 4
 Start sanlock on all hosts.
@@ -395,7 +392,7 @@ Create a lockspace for the application (from one host).
 The lockspace is named "test".
 
 .nf
-# sanlock client init -s test:0:/dev/test/leases:0
+# sanlock client init -s test:0:/dev/leases:0
 .fi
 
 .IP 5. 4
@@ -405,9 +402,9 @@ Use a unique host_id on each host.
 
 .nf
 host1:
-# sanlock client add_lockspace -s test:1/dev/vg/leases:0
+# sanlock client add_lockspace -s test:1:/dev/leases:0
 host2:
-# sanlock client add_lockspace -s test:2/dev/vg/leases:0
+# sanlock client add_lockspace -s test:2:/dev/leases:0
 .fi
 
 .IP 6. 4
@@ -417,8 +414,8 @@ The resources are named "RA" and "RB".  Offsets are used on the same
 device as the lockspace.  Different LVs or files could also be used.
 
 .nf
-# sanlock client init -r test:RA:/dev/vg/leases:1048576
-# sanlock client init -r test:RB:/dev/vg/leases:2097152
+# sanlock client init -r test:RA:/dev/leases:1048576
+# sanlock client init -r test:RB:/dev/leases:2097152
 .fi
 
 .IP 7. 4
@@ -429,8 +426,8 @@ shared lease (SH) on the second resource.
 
 .nf
 # export P=`pidof sleep`
-# sanlock client acquire -r test:RA:/dev/vg/leases:1048576 -p $P
-# sanlock client acquire -r test:RB:/dev/vg/leases:2097152:SH -p $P
+# sanlock client acquire -r test:RA:/dev/leases:1048576 -p $P
+# sanlock client acquire -r test:RB:/dev/leases:2097152:SH -p $P
 .fi
 
 .IP 8. 4
@@ -442,8 +439,8 @@ succeed.
 
 .nf
 # export P=`pidof sleep`
-# sanlock client acquire -r test:RA:/dev/vg/leases:1048576 -p $P
-# sanlock client acquire -r test:RB:/dev/vg/leases:2097152:SH -p $P
+# sanlock client acquire -r test:RA:/dev/leases:1048576 -p $P
+# sanlock client acquire -r test:RB:/dev/leases:2097152:SH -p $P
 .fi
 
 .IP 9. 4
@@ -453,8 +450,8 @@ The sleep pid could also be killed, which will result in the sanlock
 daemon releasing its leases when it exits.
 
 .nf
-# sanlock client release -r test:RA:/dev/vg/leases:1048576 -p $P
-# sanlock client release -r test:RB:/dev/vg/leases:2097152 -p $P
+# sanlock client release -r test:RA:/dev/leases:1048576 -p $P
+# sanlock client release -r test:RB:/dev/leases:2097152 -p $P
 .fi
 
 .IP 10. 4
@@ -462,9 +459,9 @@ Leave the lockspace for the application.
 
 .nf
 host1:
-# sanlock client rem_lockspace -s test:1/dev/vg/leases:0
+# sanlock client rem_lockspace -s test:1:/dev/leases:0
 host2:
-# sanlock client rem_lockspace -s test:2/dev/vg/leases:0
+# sanlock client rem_lockspace -s test:2:/dev/leases:0
 .fi
 
 .IP 11. 4
@@ -563,6 +560,7 @@ added or removed.  Add -h 1 to also show hosts in each lockspace.
 .BR "sanlock client renewal -s" " LOCKSPACE"
 
 Print a history of renewals with timing details.
+See the Renewal history section below.
 
 .B sanlock client log_dump
 
@@ -582,11 +580,13 @@ exist (command fails).
 
 Tell the sanlock daemon to initialize a lockspace on disk.  The -o option
 can be used to specify the io timeout to be written in the host_id leases.
+The -Z option can be used to specify the sector size.
 (Also see sanlock direct init.)
 
 .BR "sanlock client init -r" " RESOURCE"
 
 Tell the sanlock daemon to initialize a resource lease on disk.
+The -Z option can be used to specify the sector size.
 (Also see sanlock direct init.)
 
 .BR "sanlock client read -s" " LOCKSPACE"
@@ -726,6 +726,8 @@ host_ids can be changed for special cases using the -n num_hosts and -m
 max_hosts options.)  With -s, the -o option specifies the io timeout to be
 written in the host_id leases.  With -r, the -z 1 option invalidates the
 resource lease on disk so it cannot be used until reinitialized normally.
+The -Z option can be used to specify the sector size (and corresponding
+1MB/8MB size.)
 
 .BR "sanlock direct read_leader -s" " LOCKSPACE"
 .br
@@ -874,6 +876,64 @@ on an orphan list.  Another local process can acquire an orphan lease
 using the ORPHAN flag (-O 1), or release the orphan lease using the ORPHAN
 flag (-O 1).  All orphan leases can be released by setting the lockspace
 name (-s lockspace_name) with no resource name.
+
+.P
+
+.SS Renewal history
+
+sanlock saves a limited history of lease renewal information in each lockspace.
+See sanlock.conf renewal_history_size to set the amount of history or to
+disable (set to 0).
+
+IO times are measured in delta lease renewal (each delta lease renewal
+includes one read and one write).
+
+For each successful renewal, a record is saved that includes:
+.IP \[bu] 2
+the timestamp written in the delta lease by the renewal
+.IP \[bu] 2
+the time in milliseconds taken by the delta lease read
+.IP \[bu] 2
+the time in milliseconds taken by the delta lease write
+
+.P
+ 
+Also counted and recorded are the number io timeouts and
+other io errors that occur between successful renewals.
+
+Two consecutive successful renewals would be recorded as:
+.br
+.nf
+timestamp=5332 read_ms=482 write_ms=5525 next_timeouts=0 next_errors=0
+timestamp=5353 read_ms=99 write_ms=3161 next_timeouts=0 next_errors=0
+.fi
+
+Those fields are:
+    
+.IP \[bu] 2
+timestamp is the value written into the delta lease during
+that renewal.
+
+.IP \[bu] 2
+read_ms/write_ms are the milliseconds taken for the renewal
+read/write ios.
+    
+.IP \[bu] 2
+next_timeouts are the number of io timeouts that occured
+after the renewal recorded on that line, and before the next
+successful renewal on the following line.
+
+.IP \[bu] 2
+next_errors are the number of io errors (not timeouts) that
+occured after renewal recorded on that line, and before the
+next successful renewal on the following line.
+    
+.P
+
+The command 'sanlock client renewal -s lockspace_name' reports
+the full history of renewals saved by sanlock, which by default
+is 180 records, about 1 hour of history when using a 20 second
+renewal interval for a 10 second io timeout.
 
 .SH INTERNALS
 
@@ -1046,6 +1106,100 @@ paxos algorithm to acquire the paxos_lease, and set a new owner.
 .SH FILES
 
 /etc/sanlock/sanlock.conf
+
+.IP \[bu] 2
+quiet_fail = 1
+.br
+See -Q
+
+.IP \[bu] 2
+debug_renew = 0
+.br
+See -R
+
+.IP \[bu] 2
+logfile_priority = 4
+.br
+See -L
+
+.IP \[bu] 2
+logfile_use_utc = 0
+.br
+Use UTC instead of local time in log messages.
+
+.IP \[bu] 2
+syslog_priority = 3
+.br
+See -S
+
+.IP \[bu] 2
+names_log_priority = 4
+.br
+Log resource names at this priority level (uses syslog priority numbers).
+If this is greater than or equal to logfile_priority, each requested resource
+name and location is recorded in sanlock.log.
+
+.IP \[bu] 2
+use_watchdog = 1
+.br
+See -w
+
+.IP \[bu] 2
+high_priority = 1
+.br
+See -h
+
+.IP \[bu] 2
+mlock_level = 1
+.br
+See -l
+
+.IP \[bu] 2
+sh_retries = 8
+.br
+The number of times to try acquiring a paxos lease when acquiring a shared
+lease when the paxos lease is held by another host acquiring a shared lease.
+
+.IP \[bu] 2
+uname = sanlock
+.br
+See -U
+
+.IP \[bu] 2
+gname = sanlock
+.br
+See -G
+
+.IP \[bu] 2
+our_host_name = <str>
+.br
+See -e
+
+.IP \[bu] 2
+renewal_read_extend_sec = <seconds>
+.br
+If a renewal read i/o times out, wait this many additional seconds for that
+read to complete at the start of the subsequent renewal attempt.  When not
+configured, sanlock waits for an additional io_timeout seconds for a previous
+timed out read to complete.
+
+.IP \[bu] 2
+renewal_history_size = 180
+.br
+See -H
+
+.IP \[bu] 2
+paxos_debug_all = 0
+.br
+Include all details in the paxos debug logging.
+
+.IP \[bu] 2
+debug_io = <str>
+.br
+Add debug logging for each i/o.  "submit" (no quotes) produces debug
+output at submission time, "complete" produces debug output at completion
+time, and "submit,complete" (no space) produces both.
+
 
 .SH SEE ALSO
 .BR wdmd (8)
